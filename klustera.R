@@ -1,0 +1,118 @@
+#KLUSTERA
+#remove all the variables and data
+rm(list=ls())
+
+require(C50)
+require(gmodels)
+require(dplyr)
+require(ggplot2)
+
+#Capturamos la dirección donde está la carpeta de Klustera
+dir1 <- "D:\\Alberto\\Escritorio\\Devf\\klustera"
+
+#Leemos el archivo "e.csv" y lo capturamos en la variable dfe
+dfe <- read.csv(paste(dir1, "e.csv", sep="\\"), stringsAsFactors = TRUE, encoding = "UTF-8")
+#Leemos el archivo "v.csv" y lo capturamos en la variable dfv
+dfv <- read.csv(paste(dir1, "v.csv", sep="\\"), stringsAsFactors = TRUE, encoding = "UTF-8")
+
+#Device_Mac es el identificador único de un celular
+#branch_office es la sucursal del cliente
+#visitor indica si es visitante (True) o no (false)
+#tiempodeses es el tiempo de la sesi?n en segundos
+
+#Para ver la estructura del archivo 'e'
+str(dfe)
+summary(dfe)
+
+nrow(dfe) #Son 249556 observaciones
+ncol(dfe) #Hay 9 columnas en el dataset
+
+#Ahora vamos a graficar las actividades de los visitantes
+
+
+tible_dfe <-as_tibble(dfe)
+tempo <- tible_dfe %>%
+  group_by(branch_office, visitor) %>%
+  tally() %>%
+  ungroup()
+
+grafica_sucursal <- ggplot(tempo, aes(x = branch_office, y = n, fill = visitor)) +
+                    geom_bar(stat = "identity") +
+                    geom_text(aes(label = n), position = position_stack(vjust = 0.4)) +
+                    labs(title = "Visitantes por sucursal",
+                         x="Usuarios", y = "Cuentas", fill = "Visitante")
+
+# Guardar la gráfica
+ggsave(paste(dir1, "1.png", sep="/"), plot=grafica_sucursal, width=12, height=12) # el formato normalito
+
+
+
+diasemana <- group_by(dfe,day_of_week_tz,visitor)
+grupo1 <- summarise(diasemana,count = n())
+
+grafica_diasemana <-ggplot(grupo1,aes(x=day_of_week_tz,y=count,fill=visitor)) + 
+                  geom_point(color="blue") +
+                  geom_text(aes(label=count), position = position_stack(vjust = 0.4),size =3) +
+                  labs(title="Visitantes por Semana", subtitle="de cliente", x="Día", y="Visitantes") +
+                  theme(axis.text.x = element_blank())
+
+# Guardar la gráfica
+ggsave(paste(dir1, "2.png", sep="/"), plot=grafica_diasemana, width=12, height=12) # el formato normalito 
+
+
+#Creamos un nuevo dataset con las columnas más importantes
+usuarios <- data.frame(dfe[c(3,4,5,6,7,8,9)])
+
+#Se crea una tabla para visualizar a los visitantes y a los no visitantes
+table(usuarios$visitor)     #false   true 
+                            #164312  85244 
+
+
+round(prop.table(table(usuarios$visitor))*100)
+#Separamos el data frame para realizar el aprendizaje automatizado
+
+usuarios_entrenamiento <- usuarios[1:200000,-6] #Datos para entrenar
+usuarios_prueba <- usuarios[200001:249556,-6] #Datos para realizar las pruebas
+
+
+#Creamos las etiquetas en base a la columna de los visitantes
+usuarios_entrenamiento_etiq <- usuarios[1:200000,6] #Datos para entrenar
+usuarios_prueba_etiq <- usuarios[200001:249556,6] #Datos para realizar las pruebas
+
+#con ayuda de c50 se genera el model
+modelo_usuarios <-C5.0(usuarios_entrenamiento,usuarios_entrenamiento_etiq)
+summary(modelo_usuarios)
+
+#Una vez creado nuestro modelo, lo evaluamos
+usuarios_prediccion <- predict(modelo_usuarios,usuarios_prueba)
+
+CrossTable(usuarios_prueba_etiq,usuarios_prediccion)
+
+#Usuarios_predicción
+#usuarios_prueba_etiq |  false  |   true   |  Row Total
+#---------------------------------------------------------------
+#      false          |   32620 |      668 |     33288           97% de
+#                     |4274.994 | 9237.674 |                    precisión
+# No visitante        |   0.980 |    0.020 |     0.672
+#                     |   0.963 |    0.043 |
+#                     |   0.658 |    0.013 |
+#--------------------------------------------------------------
+#    true             |    1258 |    15010 |     16268         92% de 
+#                     |8747.603 |18902.367 |                  precisión
+#  Visitantes         |   0.077 |    0.923 |    0.328
+#                     |   0.037 |    0.957 |
+#                     |   0.025 |    0.303 |
+# -------------------------------------------------------------
+
+
+#Con los datos del modelo, lo utilizaremos en el dataframe v
+archivo_v <- data.frame(dfv[c(3,4,5,6,7,8)])
+
+#Ahora vamos a predecir el modelo
+archivo_v_prediccion <- predict(modelo_usuarios,newdata = archivo_v)
+
+#Una vez hecho esto, se agrega la columna de visitantes en el dataframe
+archivo_v$visitor <-archivo_v_prediccion
+
+#Finalmente se guarda el archivo modificado en un csv
+write.csv(archivo_v,paste(dir1,"new_v.csv",sep = "/"),fileEncoding = "UTF-8")
